@@ -56,41 +56,45 @@ class TranscriptionManager: ObservableObject {
     }
     
     func handleYouTubeURL(_ urlString: String) {
-            Task { @MainActor in
-                do {
-                    guard YouTubeManager.isValidYouTubeURL(urlString) else {
-                        throw YouTubeManager.YouTubeError.invalidURL
-                    }
-                    
-                    self.uploadState = .uploading
-                    self.isLoading = true
-                    
-                    // Download video
-                    let videoURL = try await YouTubeManager.downloadVideo(from: urlString) { progress in
-                        Task { @MainActor in
-                            self.downloadProgress = progress
-                        }
-                    }
-                    
-                    // Process the downloaded video
-                    try await transcribeVideo(videoURL)
-                    
-                    // Cleanup downloaded video
-                    try? FileManager.default.removeItem(at: videoURL)
-                    
-                } catch YouTubeManager.YouTubeError.youtubeDLNotFound {
-                    self.uploadState = .error("Internal youtube-dl not found. Please contact support.")
-                } catch YouTubeManager.YouTubeError.setupFailed {
-                    self.uploadState = .error("Failed to initialize youtube-dl. Please contact support.")
-                } catch YouTubeManager.YouTubeError.invalidURL {
-                    self.uploadState = .error("Invalid YouTube URL")
-                } catch {
-                    self.uploadState = .error(error.localizedDescription)
+        Task { @MainActor in
+            do {
+                guard YouTubeManager.isValidYouTubeURL(urlString) else {
+                    throw YouTubeManager.YouTubeError.invalidURL
                 }
                 
-                self.downloadProgress = ""
+                self.uploadState = .uploading
+                self.isLoading = true
+                
+                // Download video
+                let videoURL = try await YouTubeManager.downloadVideo(from: urlString) { progress in
+                    Task { @MainActor in
+                        self.downloadProgress = progress
+                    }
+                }
+                
+                // Process the downloaded video
+                try await transcribeVideo(videoURL)
+                
+                // Cleanup downloaded video
+                try? FileManager.default.removeItem(at: videoURL)
+                
+            } catch YouTubeManager.YouTubeError.ytDlpNotFound {
+                self.uploadState = .error("Internal yt-dlp not found. Please contact support.")
+            } catch YouTubeManager.YouTubeError.setupFailed {
+                self.uploadState = .error("Failed to initialize yt-dlp. Please contact support.")
+            } catch YouTubeManager.YouTubeError.invalidURL {
+                self.uploadState = .error("Invalid YouTube URL")
+            } catch YouTubeManager.YouTubeError.permissionDenied {
+                self.uploadState = .error("Permission denied when trying to download video.")
+            } catch YouTubeManager.YouTubeError.downloadFailed(let message) {
+                self.uploadState = .error("Download failed: \(message)")
+            } catch {
+                self.uploadState = .error(error.localizedDescription)
             }
+            
+            self.downloadProgress = ""
         }
+    }
     
     private func handleError(_ error: Error) {
         let errorMessage: String

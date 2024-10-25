@@ -4,12 +4,16 @@ class YouTubeManager {
     enum YouTubeError: Error {
         case invalidURL
         case downloadFailed(String)
-        case youtubeDLNotFound
+        case ytDlpNotFound
         case setupFailed
+        case permissionDenied
     }
     
-    private static var youtubeDLPath: String {
-        Bundle.main.bundlePath + "/Contents/Resources/youtube-dl"
+    private static var ytDlpPath: String {
+        if let resourcePath = Bundle.main.path(forResource: "yt-dlp", ofType: nil) {
+            return resourcePath
+        }
+        return Bundle.main.bundlePath + "/Contents/Resources/yt-dlp"
     }
     
     static func isValidYouTubeURL(_ urlString: String) -> Bool {
@@ -19,16 +23,14 @@ class YouTubeManager {
         return regex?.firstMatch(in: urlString, range: range) != nil
     }
     
-    private static func setupYoutubeDL() async throws {
-        // Check if youtube-dl exists in our bundle
-        guard FileManager.default.fileExists(atPath: youtubeDLPath) else {
-            throw YouTubeError.youtubeDLNotFound
+    private static func setupYtDlp() async throws {
+        guard FileManager.default.fileExists(atPath: ytDlpPath) else {
+            throw YouTubeError.ytDlpNotFound
         }
         
-        // Make it executable
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/chmod")
-        process.arguments = ["+x", youtubeDLPath]
+        process.arguments = ["+x", ytDlpPath]
         
         do {
             try process.run()
@@ -43,33 +45,36 @@ class YouTubeManager {
     }
     
     static func downloadVideo(from url: String, progressCallback: @escaping (String) -> Void) async throws -> URL {
-        // First ensure youtube-dl is setup
-        try await setupYoutubeDL()
+        try await setupYtDlp()
         
-        // Create temporary directory for download
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         
-        // Setup youtube-dl process
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: youtubeDLPath)
+        process.executableURL = URL(fileURLWithPath: ytDlpPath)
         
         let outputPath = tempDir.appendingPathComponent("video.mp4").path
         process.arguments = [
             url,
-            "--format", "best[ext=mp4]",
+            "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
             "-o", outputPath,
             "--no-playlist",
-            "--no-warnings"
+            "--no-warnings",
+            "--no-cache-dir"
         ]
         
-        // Setup pipe for output
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
+        process.currentDirectoryURL = tempDir
         
-        // Handle output in real-time
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        process.environment = env
+        
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        
         outputPipe.fileHandleForReading.readabilityHandler = { handle in
             if let line = String(data: handle.availableData, encoding: .utf8), !line.isEmpty {
                 DispatchQueue.main.async {
@@ -78,17 +83,31 @@ class YouTubeManager {
             }
         }
         
-        // Run download process
-        try process.run()
-        process.waitUntilExit()
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
+            if let line = String(data: handle.availableData, encoding: .utf8), !line.isEmpty {
+                print("yt-dlp Error: \(line)")
+            }
+        }
         
-        guard process.terminationStatus == 0,
-              let videoURL = try FileManager.default
-                .contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
-                .first else {
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            throw YouTubeError.downloadFailed("Failed to start download process: \(error.localizedDescription)")
+        }
+        
+        outputPipe.fileHandleForReading.readabilityHandler = nil
+        errorPipe.fileHandleForReading.readabilityHandler = nil
+        
+        guard process.terminationStatus == 0 else {
             throw YouTubeError.downloadFailed("Download failed with status: \(process.terminationStatus)")
         }
         
-        return videoURL
+        let expectedVideoURL = tempDir.appendingPathComponent("video.mp4")
+        guard FileManager.default.fileExists(atPath: expectedVideoURL.path) else {
+            throw YouTubeError.downloadFailed("Downloaded file not found")
+        }
+        
+        return expectedVideoURL
     }
 }
