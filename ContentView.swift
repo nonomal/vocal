@@ -4,7 +4,6 @@ import Speech
 import AVKit
 import UniformTypeIdentifiers
 
-// State management for the transcription process
 enum TranscriptionState {
     case idle
     case downloading(progress: String)
@@ -12,17 +11,6 @@ enum TranscriptionState {
     case transcribing(progress: Double)
     case completed
     case error(String)
-    
-    var description: String {
-        switch self {
-        case .idle: return "Ready"
-        case .downloading(let progress): return "Downloading: \(progress)"
-        case .preparingAudio: return "Preparing audio..."
-        case .transcribing(let progress): return "Transcribing... \(Int(progress * 100))%"
-        case .completed: return "Completed"
-        case .error(let message): return "Error: \(message)"
-        }
-    }
 }
 
 class TranscriptionManager: ObservableObject {
@@ -33,7 +21,9 @@ class TranscriptionManager: ObservableObject {
     
     private var recognitionTask: SFSpeechRecognitionTask?
     private var tempFiles: [URL] = []
-    private var accumulatedTranscription: [(timestamp: TimeInterval, text: String)] = []
+    private var transcriptionBuffer: String = ""
+    private var finalTranscriptionSegments: [String] = []
+    private var currentSegment: String = ""
     
     deinit {
         cleanupTempFiles()
@@ -65,7 +55,9 @@ class TranscriptionManager: ObservableObject {
                     throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Speech recognition authorization denied"])
                 }
                 
+                resetTranscription()
                 try await transcribeVideo(url)
+                finalizeTranscription()
                 state = .completed
             } catch {
                 state = .error(error.localizedDescription)
@@ -82,20 +74,19 @@ class TranscriptionManager: ObservableObject {
                 }
                 
                 state = .downloading(progress: "Initializing...")
+                resetTranscription()
                 
-                // Download video
                 let videoURL = try await YouTubeManager.downloadVideo(from: urlString) { progress in
                     Task { @MainActor in
                         self.state = .downloading(progress: progress)
                     }
                 }
                 
-                // Add to temp files for cleanup
                 tempFiles.append(videoURL)
                 
-                // Process the downloaded video
                 state = .preparingAudio
                 try await transcribeVideo(videoURL)
+                finalizeTranscription()
                 state = .completed
                 
             } catch {
@@ -105,15 +96,33 @@ class TranscriptionManager: ObservableObject {
         }
     }
     
-    func clearContent() {
-            videoURL = nil
-            transcription = ""
-            state = .idle
-            progress = 0
-            accumulatedTranscription.removeAll()
-            stopRecognition()
-            cleanupTempFiles()
+    private func resetTranscription() {
+        transcription = ""
+        transcriptionBuffer = ""
+        finalTranscriptionSegments.removeAll()
+        currentSegment = ""
+        progress = 0
+    }
+    
+    private func finalizeTranscription() {
+        if !currentSegment.isEmpty {
+            finalTranscriptionSegments.append(currentSegment)
         }
+        transcription = finalTranscriptionSegments.joined(separator: " ")
+        print("Final transcription length: \(transcription.count) characters")
+    }
+    
+    func clearContent() {
+        videoURL = nil
+        transcription = ""
+        transcriptionBuffer = ""
+        finalTranscriptionSegments.removeAll()
+        currentSegment = ""
+        state = .idle
+        progress = 0
+        stopRecognition()
+        cleanupTempFiles()
+    }
     
     private func stopRecognition() {
         recognitionTask?.cancel()
@@ -179,60 +188,63 @@ class TranscriptionManager: ObservableObject {
     }
     
     private func transcribeAudioFile(_ audioURL: URL, speechRecognizer: SFSpeechRecognizer, duration: Double) async throws {
-            print("Starting transcription of audio file: \(audioURL.path)")
-            
-            let request = SFSpeechURLRecognitionRequest(url: audioURL)
-            request.shouldReportPartialResults = true
-            
-            // Reset accumulated transcription
-            accumulatedTranscription.removeAll()
-            
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                self.recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-                    if let error = error {
-                        print("Recognition error: \(error)")
-                        continuation.resume(throwing: error)
-                        return
+        print("Starting transcription of audio file: \(audioURL.path)")
+        
+        let request = SFSpeechURLRecognitionRequest(url: audioURL)
+        request.shouldReportPartialResults = true
+        
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    print("Recognition error: \(error)")
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard let result = result else { return }
+                
+                Task { @MainActor in
+                    let newText = result.bestTranscription.formattedString
+                    
+                    // Only update if we have new content
+                    if newText != self.currentSegment {
+                        // If we have a substantial difference, commit the current segment
+                        if self.currentSegment.count > 0 &&
+                           abs(self.currentSegment.count - newText.count) > 10 {
+                            self.finalTranscriptionSegments.append(self.currentSegment)
+                            self.currentSegment = newText
+                        } else {
+                            self.currentSegment = newText
+                        }
+                        
+                        // Update the displayed transcription
+                        self.transcription = (self.finalTranscriptionSegments + [self.currentSegment])
+                            .joined(separator: " ")
                     }
                     
-                    guard let result = result else { return }
+                    // Update progress
+                    if let currentTime = result.bestTranscription.segments.last?.timestamp {
+                        self.progress = min(currentTime / duration, 1.0)
+                        self.state = .transcribing(progress: self.progress)
+                    }
                     
-                    Task { @MainActor in
-                        guard let self = self else { return }
-                        
-                        // Process and accumulate transcription segments
-                        let segments = result.bestTranscription.segments
-                        
-                        // Clear previous accumulated segments and add new ones
-                        self.accumulatedTranscription = segments.map { segment in
-                            (timestamp: segment.timestamp, text: segment.substring)
+                    if result.isFinal {
+                        print("Transcription completed")
+                        // Commit the final segment if we have one
+                        if !self.currentSegment.isEmpty {
+                            self.finalTranscriptionSegments.append(self.currentSegment)
+                            self.currentSegment = ""
+                            self.transcription = self.finalTranscriptionSegments.joined(separator: " ")
                         }
-                        
-                        // Sort by timestamp and join with spaces
-                        self.accumulatedTranscription.sort { $0.timestamp < $1.timestamp }
-                        self.transcription = self.accumulatedTranscription
-                            .map { $0.text }
-                            .joined(separator: " ")
-                        
-                        // Update progress
-                        if let lastTimestamp = segments.last?.timestamp {
-                            self.progress = min(lastTimestamp / duration, 1.0)
-                            self.state = .transcribing(progress: self.progress)
-                        }
-                        
-                        if result.isFinal {
-                            print("Transcription completed")
-                            
-                            // Add a final newline for readability
-                            self.transcription += "\n"
-                            
-                            continuation.resume()
-                        }
+                        continuation.resume()
                     }
                 }
             }
         }
     }
+}
 
 struct ContentView: View {
     @StateObject private var manager = TranscriptionManager()
@@ -247,37 +259,22 @@ struct ContentView: View {
             VStack(spacing: 20) {
                 if case .transcribing = manager.state,
                    !manager.transcription.isEmpty {
-                    // Show partial transcription while processing
                     transcriptionView
                 } else if case .completed = manager.state {
-                    // Show completed transcription
                     transcriptionView
                 } else if case .downloading(let progress) = manager.state {
-                    // Show download progress
                     loadingView(message: "Downloading video...", detail: progress)
                 } else if case .preparingAudio = manager.state {
-                    // Show audio preparation progress
                     loadingView(message: "Preparing audio...", detail: "")
                 } else if case .transcribing(let progress) = manager.state {
-                    // Show transcription progress
                     loadingView(message: "Transcribing...", detail: "\(Int(progress * 100))%")
                 } else if case .error(let message) = manager.state {
-                    // Show error state
                     errorView(message: message)
                 } else {
-                    // Show drop zone
                     DropZoneView(
                         isDragging: $isDragging,
                         onTap: handleFileSelection
                     )
-                }
-                
-                if case .error(let message) = manager.state {
-                    Text(message)
-                        .foregroundColor(.red)
-                        .padding()
-                        .background(Color.primary.opacity(0.05))
-                        .cornerRadius(8)
                 }
             }
             .padding(30)
