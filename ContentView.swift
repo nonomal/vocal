@@ -4,29 +4,45 @@ import Speech
 import AVKit
 import UniformTypeIdentifiers
 
+// State management for the transcription process
+enum TranscriptionState {
+    case idle
+    case downloading(progress: String)
+    case preparingAudio
+    case transcribing(progress: Double)
+    case completed
+    case error(String)
+    
+    var description: String {
+        switch self {
+        case .idle: return "Ready"
+        case .downloading(let progress): return "Downloading: \(progress)"
+        case .preparingAudio: return "Preparing audio..."
+        case .transcribing(let progress): return "Transcribing... \(Int(progress * 100))%"
+        case .completed: return "Completed"
+        case .error(let message): return "Error: \(message)"
+        }
+    }
+}
+
 class TranscriptionManager: ObservableObject {
-    @Published var isLoading = false
+    @Published var state: TranscriptionState = .idle
     @Published var videoURL: URL?
     @Published var transcription: String = ""
-    @Published var uploadState: UploadState = .idle
     @Published var progress: Double = 0
-    @Published var downloadProgress: String = ""
     
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var tempFiles: [URL] = []
     
-    enum UploadState {
-        case idle
-        case uploading
-        case processing
-        case completed
-        case error(String)
+    deinit {
+        cleanupTempFiles()
     }
     
-    enum TranscriptionError: Error {
-        case noAudioTracks
-        case authorizationDenied
-        case invalidFile
-        case processingError(String)
+    private func cleanupTempFiles() {
+        for url in tempFiles {
+            try? FileManager.default.removeItem(at: url)
+        }
+        tempFiles.removeAll()
     }
     
     func requestSpeechAuthorization() async -> Bool {
@@ -41,16 +57,18 @@ class TranscriptionManager: ObservableObject {
     func handleVideoSelection(_ url: URL) {
         Task { @MainActor in
             do {
-                self.uploadState = .uploading
-                self.videoURL = url
+                state = .preparingAudio
+                videoURL = url
                 
                 guard await requestSpeechAuthorization() else {
-                    throw TranscriptionError.authorizationDenied
+                    throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Speech recognition authorization denied"])
                 }
                 
                 try await transcribeVideo(url)
+                state = .completed
             } catch {
-                handleError(error)
+                state = .error(error.localizedDescription)
+                print("Transcription error: \(error)")
             }
         }
     }
@@ -59,73 +77,40 @@ class TranscriptionManager: ObservableObject {
         Task { @MainActor in
             do {
                 guard YouTubeManager.isValidYouTubeURL(urlString) else {
-                    throw YouTubeManager.YouTubeError.invalidURL
+                    throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid YouTube URL"])
                 }
                 
-                self.uploadState = .uploading
-                self.isLoading = true
+                state = .downloading(progress: "Initializing...")
                 
                 // Download video
                 let videoURL = try await YouTubeManager.downloadVideo(from: urlString) { progress in
                     Task { @MainActor in
-                        self.downloadProgress = progress
+                        self.state = .downloading(progress: progress)
                     }
                 }
                 
+                // Add to temp files for cleanup
+                tempFiles.append(videoURL)
+                
                 // Process the downloaded video
+                state = .preparingAudio
                 try await transcribeVideo(videoURL)
+                state = .completed
                 
-                // Cleanup downloaded video
-                try? FileManager.default.removeItem(at: videoURL)
-                
-            } catch YouTubeManager.YouTubeError.ytDlpNotFound {
-                self.uploadState = .error("Internal yt-dlp not found. Please contact support.")
-            } catch YouTubeManager.YouTubeError.setupFailed {
-                self.uploadState = .error("Failed to initialize yt-dlp. Please contact support.")
-            } catch YouTubeManager.YouTubeError.invalidURL {
-                self.uploadState = .error("Invalid YouTube URL")
-            } catch YouTubeManager.YouTubeError.permissionDenied {
-                self.uploadState = .error("Permission denied when trying to download video.")
-            } catch YouTubeManager.YouTubeError.downloadFailed(let message) {
-                self.uploadState = .error("Download failed: \(message)")
             } catch {
-                self.uploadState = .error(error.localizedDescription)
+                state = .error(error.localizedDescription)
+                print("YouTube download/transcription error: \(error)")
             }
-            
-            self.downloadProgress = ""
-        }
-    }
-    
-    private func handleError(_ error: Error) {
-        let errorMessage: String
-        if let transcriptionError = error as? TranscriptionError {
-            switch transcriptionError {
-            case .noAudioTracks:
-                errorMessage = "No audio tracks found in the video file"
-            case .authorizationDenied:
-                errorMessage = "Speech recognition authorization denied"
-            case .invalidFile:
-                errorMessage = "Invalid video file"
-            case .processingError(let message):
-                errorMessage = message
-            }
-        } else {
-            errorMessage = error.localizedDescription
-        }
-        
-        Task { @MainActor in
-            self.uploadState = .error(errorMessage)
-            self.isLoading = false
         }
     }
     
     func clearContent() {
         videoURL = nil
         transcription = ""
-        uploadState = .idle
-        isLoading = false
+        state = .idle
         progress = 0
         stopRecognition()
+        cleanupTempFiles()
     }
     
     private func stopRecognition() {
@@ -134,38 +119,28 @@ class TranscriptionManager: ObservableObject {
     }
     
     private func transcribeVideo(_ url: URL) async throws {
+        print("Starting transcription for video at: \(url.path)")
+        
         guard let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
               speechRecognizer.isAvailable else {
-            throw TranscriptionError.processingError("Speech recognition is not available")
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Speech recognition is not available"])
         }
         
-        await MainActor.run {
-            self.isLoading = true
-            self.uploadState = .processing
-        }
-        
-        // Create asset and verify audio tracks
         let asset = AVURLAsset(url: url)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         
         guard !audioTracks.isEmpty else {
-            throw TranscriptionError.noAudioTracks
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "No audio tracks found in the video"])
         }
         
         let duration = try await asset.load(.duration).seconds
+        print("Video duration: \(duration) seconds")
         
-        // Create audio file from video
         let audioURL = try await extractAudio(from: url)
+        tempFiles.append(audioURL)
+        print("Audio extracted to: \(audioURL.path)")
         
         try await transcribeAudioFile(audioURL, speechRecognizer: speechRecognizer, duration: duration)
-        
-        // Cleanup temporary file
-        try? FileManager.default.removeItem(at: audioURL)
-        
-        await MainActor.run {
-            self.isLoading = false
-            self.uploadState = .completed
-        }
     }
     
     private func extractAudio(from videoURL: URL) async throws -> URL {
@@ -179,21 +154,23 @@ class TranscriptionManager: ObservableObject {
             asset: asset,
             presetName: AVAssetExportPresetAppleM4A
         ) else {
-            throw TranscriptionError.processingError("Could not create export session")
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Could not create export session"])
         }
         
         exportSession.outputURL = tempURL
         exportSession.outputFileType = .m4a
         exportSession.audioTimePitchAlgorithm = .spectral
         
+        print("Starting audio extraction...")
         await exportSession.export()
         
         if let error = exportSession.error {
-            throw TranscriptionError.processingError("Failed to extract audio: \(error.localizedDescription)")
+            print("Audio extraction failed: \(error)")
+            throw error
         }
         
         guard exportSession.status == .completed else {
-            throw TranscriptionError.processingError("Export failed with status: \(exportSession.status.rawValue)")
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "Export failed with status: \(exportSession.status.rawValue)"])
         }
         
         return tempURL
@@ -216,14 +193,17 @@ class TranscriptionManager: ObservableObject {
                 guard let result = result else { return }
                 
                 Task { @MainActor in
-                    self?.transcription = result.bestTranscription.formattedString
-                    if let currentTime = result.bestTranscription.segments.last?.timestamp {
-                        self?.progress = min(currentTime / duration, 1.0)
-                    }
-                    
-                    if result.isFinal {
-                        print("Transcription completed")
-                        continuation.resume()
+                    if let self = self {
+                        self.transcription = result.bestTranscription.formattedString
+                        if let currentTime = result.bestTranscription.segments.last?.timestamp {
+                            self.progress = min(currentTime / duration, 1.0)
+                            self.state = .transcribing(progress: self.progress)
+                        }
+                        
+                        if result.isFinal {
+                            print("Transcription completed")
+                            continuation.resume()
+                        }
                     }
                 }
             }
@@ -234,7 +214,7 @@ class TranscriptionManager: ObservableObject {
 struct ContentView: View {
     @StateObject private var manager = TranscriptionManager()
     @State private var isDragging = false
-    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var isTextFieldFocused: Bool
     
     var body: some View {
         ZStack {
@@ -242,90 +222,125 @@ struct ContentView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 20) {
-                if manager.isLoading {
-                    VStack {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .padding()
-                        if !manager.downloadProgress.isEmpty {
-                            Text("Downloading YouTube video...")
-                                .font(.headline)
-                                .padding(.bottom, 4)
-                            Text(manager.downloadProgress)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("Transcribing... \(Int(manager.progress * 100))%")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                } else if !manager.transcription.isEmpty {
-                    ScrollView {
-                        Text(manager.transcription)
-                            .padding()
-                            .textSelection(.enabled)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.8))
-                    .cornerRadius(12)
-                    
-                    ButtonGroup(buttons: [
-                        (
-                            title: "Copy",
-                            icon: "doc.on.doc",
-                            action: { copyTranscriptionToPasteboard() }
-                        ),
-                        (
-                            title: "Save",
-                            icon: "arrow.down.circle",
-                            action: { saveTranscription() }
-                        ),
-                        (
-                            title: "Clear",
-                            icon: "trash",
-                            action: { manager.clearContent() }
-                        )
-                    ])
+                if case .transcribing = manager.state,
+                   !manager.transcription.isEmpty {
+                    // Show partial transcription while processing
+                    transcriptionView
+                } else if case .completed = manager.state {
+                    // Show completed transcription
+                    transcriptionView
+                } else if case .downloading(let progress) = manager.state {
+                    // Show download progress
+                    loadingView(message: "Downloading video...", detail: progress)
+                } else if case .preparingAudio = manager.state {
+                    // Show audio preparation progress
+                    loadingView(message: "Preparing audio...", detail: "")
+                } else if case .transcribing(let progress) = manager.state {
+                    // Show transcription progress
+                    loadingView(message: "Transcribing...", detail: "\(Int(progress * 100))%")
+                } else if case .error(let message) = manager.state {
+                    // Show error state
+                    errorView(message: message)
                 } else {
+                    // Show drop zone
                     DropZoneView(
-                                            isDragging: $isDragging,
-                                            onTap: handleFileSelection,
-                                            onPaste: { urlString in
-                                                if YouTubeManager.isValidYouTubeURL(urlString) {
-                                                    manager.handleYouTubeURL(urlString)
-                                                }
-                                            }
-                                        )
-                                    }
-                                    
-                                    if case .error(let message) = manager.uploadState {
-                                        Text(message)
-                                            .foregroundColor(.red)
-                                            .padding()
-                                            .background(Color.primary.opacity(0.05))
-                                            .cornerRadius(8)
-                                    }
-                                }
-                                .padding(30)
-                            }
-                            .frame(minWidth: 600, minHeight: 700)
-                            .onAppear {
-                                NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                                    if event.modifierFlags.contains(.command) && event.characters?.lowercased() == "v" {
-                                        if let urlString = NSPasteboard.general.string(forType: .string) {
-                                            if YouTubeManager.isValidYouTubeURL(urlString) {
-                                                manager.handleYouTubeURL(urlString)
-                                            }
-                                        }
-                                    }
-                                    return event
-                                }
-                            }
-                            .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
-                                loadFirstProvider(from: providers)
-                                return true
-                            }
+                        isDragging: $isDragging,
+                        onTap: handleFileSelection
+                    )
+                }
+                
+                if case .error(let message) = manager.state {
+                    Text(message)
+                        .foregroundColor(.red)
+                        .padding()
+                        .background(Color.primary.opacity(0.05))
+                        .cornerRadius(8)
+                }
+            }
+            .padding(30)
+        }
+        .frame(minWidth: 600, minHeight: 700)
+        .onAppear {
+            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                if event.modifierFlags.contains(.command) && event.characters?.lowercased() == "v" {
+                    if let urlString = NSPasteboard.general.string(forType: .string) {
+                        if YouTubeManager.isValidYouTubeURL(urlString) {
+                            manager.handleYouTubeURL(urlString)
                         }
+                    }
+                }
+                return event
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
+            loadFirstProvider(from: providers)
+            return true
+        }
+    }
+    
+    private var transcriptionView: some View {
+        VStack {
+            ScrollView {
+                Text(manager.transcription)
+                    .padding()
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.primary.opacity(0.05))
+            .cornerRadius(12)
+            
+            ButtonGroup(buttons: [
+                (
+                    title: "Copy",
+                    icon: "doc.on.doc",
+                    action: { copyTranscriptionToPasteboard() }
+                ),
+                (
+                    title: "Save",
+                    icon: "arrow.down.circle",
+                    action: { saveTranscription() }
+                ),
+                (
+                    title: "Clear",
+                    icon: "trash",
+                    action: { manager.clearContent() }
+                )
+            ])
+        }
+    }
+    
+    private func loadingView(message: String, detail: String) -> some View {
+        VStack {
+            ProgressView()
+                .scaleEffect(1.5)
+                .padding()
+            Text(message)
+                .font(.headline)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    private func errorView(message: String) -> some View {
+        VStack {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 40))
+                .foregroundColor(.red)
+                .padding()
+            
+            Text(message)
+                .foregroundColor(.red)
+                .multilineTextAlignment(.center)
+            
+            Button("Try Again") {
+                manager.clearContent()
+            }
+            .padding(.top)
+        }
+    }
     
     private func loadFirstProvider(from providers: [NSItemProvider]) {
         guard let provider = providers.first else { return }
@@ -335,7 +350,7 @@ struct ContentView: View {
                 if let error = error {
                     print("Error loading URL: \(error)")
                     Task { @MainActor in
-                        self.manager.uploadState = .error("Failed to load dropped file")
+                        manager.state = .error("Failed to load dropped file")
                     }
                     return
                 }
@@ -398,7 +413,7 @@ struct ContentView: View {
             do {
                 try manager.transcription.write(to: url, atomically: true, encoding: .utf8)
             } catch {
-                manager.uploadState = .error("Failed to save transcription: \(error.localizedDescription)")
+                manager.state = .error("Failed to save transcription: \(error.localizedDescription)")
             }
         }
     }

@@ -16,6 +16,12 @@
 	<array>
 		<string>/</string>
 	</array>
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+	<array>
+    <string>/usr/local/bin/python3</string>
+    <string>/usr/bin/python3</string>
+    <string>/opt/homebrew/bin/python3</string>
+	</array>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
     <key>com.apple.security.files.downloads.read-write</key>

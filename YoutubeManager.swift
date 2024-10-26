@@ -7,13 +7,43 @@ class YouTubeManager {
         case ytDlpNotFound
         case setupFailed
         case permissionDenied
+        case pythonNotFound
     }
     
-    private static var ytDlpPath: String {
+    private static var ytDlpPath: String? {
+        // First try to find yt-dlp in the system
+        let systemPaths = [
+            "/usr/local/bin/yt-dlp",
+            "/opt/homebrew/bin/yt-dlp"
+        ]
+        
+        for path in systemPaths {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        
+        // Fall back to the bundled version
         if let resourcePath = Bundle.main.path(forResource: "yt-dlp", ofType: nil) {
             return resourcePath
         }
-        return Bundle.main.bundlePath + "/Contents/Resources/yt-dlp"
+        return nil
+    }
+    
+    private static func findPython() throws -> String {
+        let pythonPaths = [
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3",
+            "/usr/bin/python3"
+        ]
+        
+        for path in pythonPaths {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+        
+        throw YouTubeError.pythonNotFound
     }
     
     static func isValidYouTubeURL(_ urlString: String) -> Bool {
@@ -23,51 +53,68 @@ class YouTubeManager {
         return regex?.firstMatch(in: urlString, range: range) != nil
     }
     
-    private static func setupYtDlp() async throws {
-        guard FileManager.default.fileExists(atPath: ytDlpPath) else {
+    static func downloadVideo(from url: String, progressCallback: @escaping (String) -> Void) async throws -> URL {
+        // Ensure we have yt-dlp
+        guard let ytDlpPath = ytDlpPath else {
             throw YouTubeError.ytDlpNotFound
         }
         
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/chmod")
-        process.arguments = ["+x", ytDlpPath]
+        // Find Python interpreter
+        let pythonPath = try findPython()
         
-        do {
-            try process.run()
-            process.waitUntilExit()
-            
-            guard process.terminationStatus == 0 else {
-                throw YouTubeError.setupFailed
-            }
-        } catch {
-            throw YouTubeError.setupFailed
-        }
-    }
-    
-    static func downloadVideo(from url: String, progressCallback: @escaping (String) -> Void) async throws -> URL {
-        try await setupYtDlp()
-        
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
+        // Create temporary directory in the app's container
+        let containerURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let tempDir = containerURL.appendingPathComponent("Downloads").appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: ytDlpPath)
-        
         let outputPath = tempDir.appendingPathComponent("video.mp4").path
-        process.arguments = [
-            url,
-            "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "-o", outputPath,
-            "--no-playlist",
-            "--no-warnings",
-            "--no-cache-dir"
-        ]
         
-        process.currentDirectoryURL = tempDir
+        // Create a temporary script file
+        let scriptPath = tempDir.appendingPathComponent("download_script.py")
+        let scriptContent = """
+        #!/usr/bin/env python3
+        # -*- coding: utf-8 -*-
+        import sys
+        import subprocess
         
+        def main():
+            try:
+                cmd = [
+                    '\(ytDlpPath)',
+                    '\(url)',
+                    '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                    '-o', '\(outputPath)',
+                    '--no-playlist',
+                    '--no-warnings',
+                    '--no-cache-dir',
+                    '--force-overwrites'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.stderr:
+                    print(result.stderr, file=sys.stderr)
+                if result.stdout:
+                    print(result.stdout)
+                sys.exit(result.returncode)
+            except Exception as e:
+                print(f"Error: {str(e)}", file=sys.stderr)
+                sys.exit(1)
+        
+        if __name__ == '__main__':
+            main()
+        """
+        
+        try scriptContent.write(to: scriptPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath.path)
+        
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = [scriptPath.path]
+        
+        // Set up environment
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
+        env["PYTHONIOENCODING"] = "utf-8"
+        env.removeValue(forKey: "PYTHONPATH")
         process.environment = env
         
         let outputPipe = Pipe()
@@ -103,11 +150,14 @@ class YouTubeManager {
             throw YouTubeError.downloadFailed("Download failed with status: \(process.terminationStatus)")
         }
         
-        let expectedVideoURL = tempDir.appendingPathComponent("video.mp4")
-        guard FileManager.default.fileExists(atPath: expectedVideoURL.path) else {
+        // Verify the video file exists
+        guard FileManager.default.fileExists(atPath: outputPath) else {
             throw YouTubeError.downloadFailed("Downloaded file not found")
         }
         
-        return expectedVideoURL
+        // Clean up the script file
+        try? FileManager.default.removeItem(at: scriptPath)
+        
+        return URL(fileURLWithPath: outputPath)
     }
 }
