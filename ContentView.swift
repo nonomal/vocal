@@ -234,8 +234,7 @@ class TranscriptionManager: ObservableObject {
 struct ContentView: View {
     @StateObject private var manager = TranscriptionManager()
     @State private var isDragging = false
-    @State private var showYouTubeAlert = false
-    @State private var youtubeURL = ""
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         ZStack {
@@ -267,7 +266,7 @@ struct ContentView: View {
                             .textSelection(.enabled)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.primary.opacity(0.05))
+                    .background(colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.8))
                     .cornerRadius(12)
                     
                     ButtonGroup(buttons: [
@@ -288,54 +287,45 @@ struct ContentView: View {
                         )
                     ])
                 } else {
-                    DropZoneView(isDragging: $isDragging) {
-                        handleFileSelection()
-                    }
-                    .overlay(
-                        VStack {
-                            Text("or")
-                                .foregroundColor(.secondary)
-                                .padding(.vertical)
-                            
-                            Button("Enter YouTube URL") {
-                                showYouTubeAlert = true
+                    DropZoneView(
+                                            isDragging: $isDragging,
+                                            onTap: handleFileSelection,
+                                            onPaste: { urlString in
+                                                if YouTubeManager.isValidYouTubeURL(urlString) {
+                                                    manager.handleYouTubeURL(urlString)
+                                                }
+                                            }
+                                        )
+                                    }
+                                    
+                                    if case .error(let message) = manager.uploadState {
+                                        Text(message)
+                                            .foregroundColor(.red)
+                                            .padding()
+                                            .background(Color.primary.opacity(0.05))
+                                            .cornerRadius(8)
+                                    }
+                                }
+                                .padding(30)
                             }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.accentColor)
+                            .frame(minWidth: 600, minHeight: 700)
+                            .onAppear {
+                                NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                                    if event.modifierFlags.contains(.command) && event.characters?.lowercased() == "v" {
+                                        if let urlString = NSPasteboard.general.string(forType: .string) {
+                                            if YouTubeManager.isValidYouTubeURL(urlString) {
+                                                manager.handleYouTubeURL(urlString)
+                                            }
+                                        }
+                                    }
+                                    return event
+                                }
+                            }
+                            .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
+                                loadFirstProvider(from: providers)
+                                return true
+                            }
                         }
-                        .padding(.bottom, 40),
-                        alignment: .bottom
-                    )
-                }
-                
-                if case .error(let message) = manager.uploadState {
-                    Text(message)
-                        .foregroundColor(.red)
-                        .padding()
-                        .background(Color.primary.opacity(0.05))
-                        .cornerRadius(8)
-                }
-            }
-            .padding(30)
-        }
-        .frame(minWidth: 600, minHeight: 700)
-        .alert("Enter YouTube URL", isPresented: $showYouTubeAlert) {
-            TextField("YouTube URL", text: $youtubeURL)
-            Button("Download & Transcribe") {
-                manager.handleYouTubeURL(youtubeURL)
-                youtubeURL = ""
-            }
-            Button("Cancel", role: .cancel) {
-                youtubeURL = ""
-            }
-        } message: {
-            Text("Enter a YouTube video URL to download and transcribe")
-        }
-        .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
-            loadFirstProvider(from: providers)
-            return true
-        }
-    }
     
     private func loadFirstProvider(from providers: [NSItemProvider]) {
         guard let provider = providers.first else { return }

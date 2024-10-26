@@ -1,8 +1,10 @@
+// DropZoneView.swift
 import SwiftUI
 
 struct DropZoneView: View {
     @Binding var isDragging: Bool
     let onTap: () -> Void
+    var onPaste: ((String) -> Void)?
     
     var body: some View {
         Button(action: onTap) {
@@ -14,6 +16,17 @@ struct DropZoneView: View {
                 Text("Click or drop a video here")
                     .font(.title3)
                     .foregroundColor(.secondary)
+                
+                // Paste hint
+                Text("⌘V to paste YouTube URL")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+                    .padding(.top, 20)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
