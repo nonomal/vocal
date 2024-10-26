@@ -33,6 +33,7 @@ class TranscriptionManager: ObservableObject {
     
     private var recognitionTask: SFSpeechRecognitionTask?
     private var tempFiles: [URL] = []
+    private var accumulatedTranscription: [(timestamp: TimeInterval, text: String)] = []
     
     deinit {
         cleanupTempFiles()
@@ -105,13 +106,14 @@ class TranscriptionManager: ObservableObject {
     }
     
     func clearContent() {
-        videoURL = nil
-        transcription = ""
-        state = .idle
-        progress = 0
-        stopRecognition()
-        cleanupTempFiles()
-    }
+            videoURL = nil
+            transcription = ""
+            state = .idle
+            progress = 0
+            accumulatedTranscription.removeAll()
+            stopRecognition()
+            cleanupTempFiles()
+        }
     
     private func stopRecognition() {
         recognitionTask?.cancel()
@@ -177,31 +179,53 @@ class TranscriptionManager: ObservableObject {
     }
     
     private func transcribeAudioFile(_ audioURL: URL, speechRecognizer: SFSpeechRecognizer, duration: Double) async throws {
-        print("Starting transcription of audio file: \(audioURL.path)")
-        
-        let request = SFSpeechURLRecognitionRequest(url: audioURL)
-        request.shouldReportPartialResults = true
-        
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            self.recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-                if let error = error {
-                    print("Recognition error: \(error)")
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                guard let result = result else { return }
-                
-                Task { @MainActor in
-                    if let self = self {
-                        self.transcription = result.bestTranscription.formattedString
-                        if let currentTime = result.bestTranscription.segments.last?.timestamp {
-                            self.progress = min(currentTime / duration, 1.0)
+            print("Starting transcription of audio file: \(audioURL.path)")
+            
+            let request = SFSpeechURLRecognitionRequest(url: audioURL)
+            request.shouldReportPartialResults = true
+            
+            // Reset accumulated transcription
+            accumulatedTranscription.removeAll()
+            
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                self.recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
+                    if let error = error {
+                        print("Recognition error: \(error)")
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    
+                    guard let result = result else { return }
+                    
+                    Task { @MainActor in
+                        guard let self = self else { return }
+                        
+                        // Process and accumulate transcription segments
+                        let segments = result.bestTranscription.segments
+                        
+                        // Clear previous accumulated segments and add new ones
+                        self.accumulatedTranscription = segments.map { segment in
+                            (timestamp: segment.timestamp, text: segment.substring)
+                        }
+                        
+                        // Sort by timestamp and join with spaces
+                        self.accumulatedTranscription.sort { $0.timestamp < $1.timestamp }
+                        self.transcription = self.accumulatedTranscription
+                            .map { $0.text }
+                            .joined(separator: " ")
+                        
+                        // Update progress
+                        if let lastTimestamp = segments.last?.timestamp {
+                            self.progress = min(lastTimestamp / duration, 1.0)
                             self.state = .transcribing(progress: self.progress)
                         }
                         
                         if result.isFinal {
                             print("Transcription completed")
+                            
+                            // Add a final newline for readability
+                            self.transcription += "\n"
+                            
                             continuation.resume()
                         }
                     }
@@ -209,7 +233,6 @@ class TranscriptionManager: ObservableObject {
             }
         }
     }
-}
 
 struct ContentView: View {
     @StateObject private var manager = TranscriptionManager()
