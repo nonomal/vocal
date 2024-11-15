@@ -21,6 +21,8 @@ class TranscriptionManager: ObservableObject {
     @Published var progress: Double = 0
     @Published var wordCount: Int = 0
     @Published var estimatedReadingTime: TimeInterval = 0
+    @Published private(set) var missingDependencies: [DependencyStatus] = []
+    @Published var showDependencyAlert = false
     
     private var recognitionTask: SFSpeechRecognitionTask?
     private var tempFiles: [URL] = []
@@ -94,6 +96,10 @@ class TranscriptionManager: ObservableObject {
     func handleYouTubeURL(_ urlString: String) {
         Task {
             do {
+                guard await checkDependencies() else {
+                    return
+                }
+                
                 guard YouTubeManager.isValidYouTubeURL(urlString) else {
                     await MainActor.run {
                         self.state = .error("Invalid YouTube URL")
@@ -351,6 +357,20 @@ class TranscriptionManager: ObservableObject {
     @MainActor
     func handleError(_ message: String) {
         state = .error(message)
+    }
+    
+    @MainActor
+    private func checkDependencies() async -> Bool {
+        let statuses = await SystemDependencyChecker.checkDependencies()
+        let missing = statuses.filter { if case .missing = $0 { return true }; return false }
+        
+        if !missing.isEmpty {
+            missingDependencies = missing
+            showDependencyAlert = true
+            return false
+        }
+        
+        return true
     }
 }
 

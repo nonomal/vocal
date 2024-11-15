@@ -64,6 +64,12 @@ struct ContentView: View {
             loadFirstProvider(from: providers)
             return true
         }
+        .sheet(isPresented: $manager.showDependencyAlert) {
+            DependencyAlertView(
+                missingDependencies: manager.missingDependencies,
+                onDismiss: { manager.showDependencyAlert = false }
+            )
+        }
     }
     
     // MARK: - Subviews
@@ -121,7 +127,7 @@ struct ContentView: View {
     private var statsView: some View {
         HStack(spacing: 16) {
             StatisticView(
-                icon: "text.word.count",
+                icon: "textformat",
                 value: "\(wordCount)",
                 label: "words"
             )
@@ -248,6 +254,7 @@ struct ContentView: View {
                         Task { @MainActor in
                             manager.handleYouTubeURL(urlString)
                         }
+                        return nil // Consume the event when we handle it
                     }
                 }
             }
