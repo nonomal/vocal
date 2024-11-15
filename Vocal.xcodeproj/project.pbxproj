@@ -10,9 +10,22 @@
 		C8E129EE2CE798010027BB04 /* Vocal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Vocal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C813B38F2CE79E6C008182E6 /* Exceptions for "Vocal" folder in "Vocal" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				TranscriptionManager.swift,
+			);
+			target = C8E129ED2CE798010027BB04 /* Vocal */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C83198A62CCBDA4200087E8D /* Vocal */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C813B38F2CE79E6C008182E6 /* Exceptions for "Vocal" folder in "Vocal" target */,
+			);
 			path = Vocal;
 			sourceTree = "<group>";
 		};
@@ -257,7 +270,7 @@
 				CODE_SIGN_ENTITLEMENTS = Vocal/Vocal.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_ASSET_PATHS = "\"Vocal/Preview Content\"";
 				DEVELOPMENT_TEAM = YYMLDY74QZ;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -270,7 +283,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.5;
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = Minimal.Vocal;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -286,7 +299,7 @@
 				CODE_SIGN_ENTITLEMENTS = Vocal/Vocal.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 17;
+				CURRENT_PROJECT_VERSION = 18;
 				DEVELOPMENT_ASSET_PATHS = "\"Vocal/Preview Content\"";
 				DEVELOPMENT_TEAM = YYMLDY74QZ;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -299,7 +312,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.5;
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = Minimal.Vocal;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

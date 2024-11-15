@@ -122,17 +122,20 @@ class YouTubeManager {
         process.standardOutput = outputPipe
         process.standardError = errorPipe
         
-        outputPipe.fileHandleForReading.readabilityHandler = { handle in
-            if let line = String(data: handle.availableData, encoding: .utf8), !line.isEmpty {
-                DispatchQueue.main.async {
-                    progressCallback(line)
+        outputPipe.fileHandleForReading.readabilityHandler = { fileHandle in
+            if let outputText = String(data: fileHandle.availableData, encoding: .utf8),
+               !outputText.isEmpty {
+                // Parse progress from the output
+                if outputText.contains("%") {
+                    progressCallback(outputText)
                 }
             }
         }
         
-        errorPipe.fileHandleForReading.readabilityHandler = { handle in
-            if let line = String(data: handle.availableData, encoding: .utf8), !line.isEmpty {
-                print("yt-dlp Error: \(line)")
+        errorPipe.fileHandleForReading.readabilityHandler = { fileHandle in
+            if let errorText = String(data: fileHandle.availableData, encoding: .utf8), 
+               !errorText.isEmpty {
+                print("yt-dlp Error: \(errorText)")
             }
         }
         
