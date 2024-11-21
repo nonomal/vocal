@@ -22,8 +22,14 @@ struct ContentView: View {
             
             VStack(spacing: 20) {
                 // Main content area
-                if case .transcribing = manager.state,
-                   !manager.transcription.isEmpty {
+                if case .checkingDependencies = manager.state {
+                    loadingView(
+                        message: "Checking system requirements...",
+                        progress: nil,
+                        detail: "This may take a moment"
+                    )
+                } else if case .transcribing = manager.state,
+                          !manager.transcription.isEmpty {
                     transcriptionView
                 } else if case .completed = manager.state {
                     transcriptionView
@@ -37,13 +43,13 @@ struct ContentView: View {
                     loadingView(
                         message: "Preparing audio...",
                         progress: nil,
-                        detail: ""
+                        detail: "Extracting audio from video"
                     )
-                } else if case .transcribing(let progress) = manager.state {
+                } else if case .transcribing(let progress, let currentText) = manager.state {
                     loadingView(
                         message: "Transcribing...",
                         progress: progress,
-                        detail: "\(Int(progress * 100))%"
+                        detail: "\(Int(progress * 100))% - Currently processing: \(currentText.suffix(50))..."
                     )
                 } else if case .error(let message) = manager.state {
                     errorView(message: message)
@@ -90,14 +96,20 @@ struct ContentView: View {
                 searchBar
             }
             
-            // Main transcription text area
+            // Main transcription area with adaptive text
             ScrollView {
-                Text(manager.transcription)
-                    .padding()
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineSpacing(4)
-                    .font(.body)
+                if manager.transcription.count < 500 {
+                    AdaptiveTextView(text: manager.transcription)
+                        .padding()
+                        .textSelection(.enabled)
+                } else {
+                    Text(manager.transcription)
+                        .padding()
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineSpacing(4)
+                        .font(.body)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.primary.opacity(0.05))
@@ -173,24 +185,111 @@ struct ContentView: View {
     }
     
     private func loadingView(message: String, progress: Double?, detail: String) -> some View {
-        VStack(spacing: 12) {
-            if let progress = progress {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .frame(width: 200)
-            } else {
-                ProgressView()
-                    .scaleEffect(1.5)
+        VStack(spacing: 24) {
+            // Main progress container
+            VStack(spacing: 16) {
+                // Title and progress percentage
+                HStack {
+                    Text(message)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    if let progress = progress {
+                        Text("\(Int(progress * 100))%")
+                            .font(.system(.subheadline, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                if let progress = progress {
+                    // Modern progress bar
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            // Background track
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.secondary.opacity(0.1))
+                                .frame(height: 4)
+                            
+                            // Progress fill with gradient
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [
+                                            Color.accentColor,
+                                            Color.accentColor.opacity(0.8)
+                                        ]),
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: geometry.size.width * progress, height: 4)
+                                .animation(.linear(duration: 0.3), value: progress)
+                        }
+                    }
+                    .frame(height: 4)
+                    
+                    // Download stats container
+                    if case .downloading(_, let speed, let eta, let size) = manager.downloadState {
+                        HStack(spacing: 16) {
+                            // Speed indicator
+                            if let speed = speed {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .foregroundColor(.accentColor)
+                                    Text(speed)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            // Divider
+                            if speed != nil && (eta != nil || size != nil) {
+                                Text("·")
+                                    .foregroundColor(.secondary.opacity(0.5))
+                            }
+                            
+                            // ETA
+                            if let eta = eta {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "clock.fill")
+                                        .foregroundColor(.accentColor.opacity(0.8))
+                                    Text(eta.replacingOccurrences(of: "ETA: ", with: ""))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            // Divider
+                            if eta != nil && size != nil {
+                                Text("·")
+                                    .foregroundColor(.secondary.opacity(0.5))
+                            }
+                            
+                            // File size
+                            if let size = size {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "folder.fill")
+                                        .foregroundColor(.accentColor.opacity(0.6))
+                                    Text(size)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .font(.system(.caption, design: .rounded))
+                        .padding(.top, 8)
+                    }
+                } else {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
             }
-            
-            Text(message)
-                .font(.headline)
-            
-            if !detail.isEmpty {
-                Text(detail)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(NSColor.windowBackgroundColor))
+                    .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+            )
+            .frame(maxWidth: 400)
         }
     }
     
@@ -340,3 +439,4 @@ struct ContentView: View {
         }
     }
 }
+

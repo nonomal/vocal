@@ -23,7 +23,7 @@ struct DependencyAlertView: View {
             // Dependencies list
             VStack(alignment: .leading, spacing: 16) {
                 ForEach(missingDependencies, id: \.dependency.rawValue) { status in
-                    if case .missing(let dep, let cmd, let url) = status {
+                    if case .missing(let dep, let cmd, let url) = status.type {
                         DependencyRow(
                             name: dep.rawValue,
                             installCommand: cmd,

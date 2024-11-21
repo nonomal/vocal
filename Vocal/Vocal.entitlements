@@ -30,5 +30,9 @@
     <array>
         <string>/</string>
     </array>
+    <string>/usr/local/bin/ffmpeg</string>
+    <string>/opt/homebrew/bin/ffmpeg</string>
+    <string>/usr/local/bin/ffprobe</string>
+    <string>/opt/homebrew/bin/ffprobe</string>
 </dict>
 </plist>
