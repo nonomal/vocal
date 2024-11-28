@@ -87,7 +87,7 @@ Please ensure your PR:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🔗 Links
-- Website: [Nuance](https://nuancedev.vercel.app)
+- Website: [Nuanc.me](https://nuanc.me)
 - Report issues: [GitHub Issues](https://github.com/nuance-dev/Vocal/issues)
 - Follow updates: [@Nuancedev](https://twitter.com/Nuancedev)
 
