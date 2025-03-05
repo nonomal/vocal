@@ -1,6 +1,6 @@
 import SwiftUI
 // Debouncer utility class
-private class Debouncer {
+class Debouncer {
     private let delay: TimeInterval
     private var workItem: DispatchWorkItem?
     

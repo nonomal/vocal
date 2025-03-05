@@ -2,6 +2,7 @@ import Foundation
 import Speech
 import SwiftUI
 import OSLog
+import ObjectiveC
 
 enum TranscriptionState {
     case idle
@@ -93,7 +94,7 @@ class TranscriptionManager: ObservableObject {
                 @unknown default:
                     Self.logger.warning("Speech recognition unknown status")
                 }
-                continuation.resume(returning: status)
+                continuation.resumeIfNotResolved(returning: status)
             }
         }
         return status == .authorized
@@ -304,14 +305,40 @@ class TranscriptionManager: ObservableObject {
         try await withCheckedThrowingContinuation { [weak self] (continuation: CheckedContinuation<Void, Error>) in
             guard let self = self else {
                 Self.logger.error("Self was deallocated")
-                continuation.resume(throwing: TranscriptionError.unknown)
+                continuation.resumeIfNotResolved(throwing: TranscriptionError.unknown)
                 return
+            }
+            
+            // Set a timeout for the recognition task
+            let timeoutTask = Task { 
+                do {
+                    // Use a relative timeout based on audio duration, but set a max of 30 minutes
+                    let timeoutDuration = min(max(duration * 1.5, 30), 30 * 60)  // in seconds
+                    try await Task.sleep(nanoseconds: UInt64(timeoutDuration * 1_000_000_000))
+                    // If we're still running after timeout, cancel and resume
+                    if self.recognitionTask != nil {
+                        Self.logger.warning("Recognition task timed out, cancelling")
+                        await MainActor.run {
+                            self.cancellRecognitionTask()
+                            // Don't throw an error, just end gracefully with whatever we have
+                            if !continuation.isResolved {
+                                continuation.resumeIfNotResolved()
+                            }
+                        }
+                    }
+                } catch {
+                    // Task was cancelled, which is fine
+                }
             }
             
             self.recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
                 if let error = error {
                     Self.logger.error("Recognition task failed with error: \(error.localizedDescription)")
-                    continuation.resume(throwing: error)
+                    // Cancel the timeout task
+                    timeoutTask.cancel()
+                    if !continuation.isResolved {
+                        continuation.resumeIfNotResolved(throwing: error)
+                    }
                     return
                 }
                 
@@ -324,25 +351,34 @@ class TranscriptionManager: ObservableObject {
                     guard let self = self else { return }
                     
                     // Update progress
-                    let calculatedProgress = min(result.bestTranscription.segments.last?.timestamp ?? 0 / duration, 1.0)
+                    let calculatedProgress = min((result.bestTranscription.segments.last?.timestamp ?? 0) / duration, 1.0)
                     self.progress = calculatedProgress
                     
                     let segmentText = result.bestTranscription.formattedString
                     self.currentSegmentText = segmentText
                     
+                    // Log progress periodically
+                    if Int(calculatedProgress * 100) % 10 == 0 {
+                        Self.logger.debug("Transcription progress: \(Int(calculatedProgress * 100))%, text length: \(segmentText.count)")
+                    }
+                    
                     // Add as segment if it's final or we've reached the end
                     if result.isFinal {
                         self.addSegment(TranscriptionSegment(
                             text: segmentText,
-                            timestamp: 0,
+                            timestamp: result.bestTranscription.segments.last?.timestamp ?? 0,
                             isFinal: true
                         ))
                         
                         // If we're done, complete the continuation
-                        if calculatedProgress >= 0.99 {
+                        if calculatedProgress >= 0.99 || result.isFinal {
                             self.cancellRecognitionTask()
+                            // Cancel the timeout task
+                            timeoutTask.cancel()
                             Self.logger.info("Transcription completed successfully")
-                            continuation.resume()
+                            if !continuation.isResolved {
+                                continuation.resumeIfNotResolved()
+                            }
                         }
                     }
                     
@@ -582,5 +618,50 @@ enum TranscriptionError: LocalizedError {
         case .unknown:
             return "An unknown error occurred"
         }
+    }
+}
+
+// Reference type to track resolution state
+private class ResolutionState {
+    var isResolved = false
+}
+
+// Extension to track continuation resolution
+private var continuationKey: UInt8 = 0
+
+extension CheckedContinuation {
+    // Use associated object to track whether continuation has been resolved
+    private var resolutionState: ResolutionState {
+        get {
+            if let state = objc_getAssociatedObject(self, &continuationKey) as? ResolutionState {
+                return state
+            }
+            let state = ResolutionState()
+            objc_setAssociatedObject(self, &continuationKey, state, .OBJC_ASSOCIATION_RETAIN)
+            return state
+        }
+    }
+    
+    var isResolved: Bool {
+        return resolutionState.isResolved
+    }
+    
+    // Non-mutating methods that work with any CheckedContinuation
+    func resumeIfNotResolved() where T == Void {
+        guard !resolutionState.isResolved else { return }
+        resolutionState.isResolved = true
+        resume()
+    }
+    
+    func resumeIfNotResolved(throwing error: E) {
+        guard !resolutionState.isResolved else { return }
+        resolutionState.isResolved = true
+        resume(throwing: error)
+    }
+    
+    func resumeIfNotResolved<Value>(returning value: Value) where Value == T {
+        guard !resolutionState.isResolved else { return }
+        resolutionState.isResolved = true
+        resume(returning: value)
     }
 }
