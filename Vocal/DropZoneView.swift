@@ -10,123 +10,150 @@ struct DropZoneView: View {
     @State private var isPulsing = false
     @Environment(\.colorScheme) private var colorScheme
     
+    // Updated gradient with more subtle colors
     private let accentGradient = LinearGradient(
-        colors: [Color.blue, Color.purple.opacity(0.8)],
+        colors: [Color.blue.opacity(0.7), Color.purple.opacity(0.6)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
     
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 32) {
-                // Icon with animation
+            VStack(spacing: 24) {
+                // Icon with subtle animation
                 ZStack {
-                    // Background circles
+                    // Animated ring
                     Circle()
-                        .fill(Color.accentColor.opacity(0.08))
-                        .frame(width: 100, height: 100)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.blue.opacity(isDragging ? 0.5 : 0.2),
+                                    Color.purple.opacity(isDragging ? 0.4 : 0.15)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: isDragging ? 2 : 1.5
+                        )
+                        .frame(width: 84, height: 84)
+                        .scaleEffect(isPulsing ? 1.05 : 1.0)
                     
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.12))
-                        .frame(width: 90, height: 90)
-                        .scaleEffect(isPulsing ? 1.1 : 1.0)
-                    
+                    // Inner circle
                     Circle()
                         .fill(
-                            isDragging ? accentGradient : LinearGradient(
-                                gradient: Gradient(colors: [Color.accentColor.opacity(0.2), Color.accentColor.opacity(0.2)]),
+                            LinearGradient(
+                                colors: [
+                                    Color.blue.opacity(isDragging ? 0.12 : 0.08),
+                                    Color.purple.opacity(isDragging ? 0.10 : 0.06)
+                                ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 80, height: 80)
+                        .frame(width: 70, height: 70)
                     
-                    Circle()
-                        .strokeBorder(Color.accentColor.opacity(0.3), lineWidth: isDragging ? 2 : 1)
-                        .frame(width: 80, height: 80)
-                    
+                    // Icon
                     Image(systemName: isDragging ? "arrow.down.doc.fill" : "arrow.down.doc")
-                        .font(.system(size: 32, weight: .light))
-                        .foregroundColor(.accentColor)
-                        .opacity(isDragging ? 1.0 : 0.8)
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundColor(
+                            Color.blue.opacity(isDragging ? 0.9 : 0.7)
+                        )
                 }
-                .scaleEffect(isDragging ? 1.1 : 1.0)
+                .scaleEffect(isDragging ? 1.05 : 1.0)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isDragging)
                 .onAppear {
                     // Start subtle pulsing animation
-                    withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                    withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
                         isPulsing = true
                     }
                 }
                 
                 // Text content
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     // Main text
-                    Text("Drop a video file or click to browse")
-                        .font(.system(size: 18, weight: .medium, design: .rounded))
+                    Text("Drop video file or click to browse")
+                        .font(.system(size: 16, weight: .medium, design: .default))
                         .foregroundColor(.primary)
                         .multilineTextAlignment(.center)
                     
                     // Paste hint with keyboard shortcut styling
-                    VStack(spacing: 8) {
-                        Text("Or paste a YouTube URL")
-                            .font(.subheadline)
+                    HStack(spacing: 6) {
+                        Text("Paste YouTube URL")
+                            .font(.system(size: 13, weight: .regular))
                             .foregroundColor(.secondary)
                         
-                        KeyboardShortcut(keys: ["⌘", "V"])
+                        Text("⌘V")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.primary.opacity(0.06))
+                            )
                     }
+                    .opacity(0.8)
                 }
             }
             .padding(40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 ZStack {
-                    // Base background
-                    RoundedRectangle(cornerRadius: 24)
+                    // Base background - more refined with less opacity
+                    RoundedRectangle(cornerRadius: 16)
                         .fill(
                             colorScheme == .dark ? 
-                                Color.black.opacity(0.3) : 
-                                Color.white.opacity(0.95)
+                                Color.black.opacity(0.2) : 
+                                Color.white.opacity(0.7)
                         )
                     
                     // Border
-                    RoundedRectangle(cornerRadius: 24)
+                    RoundedRectangle(cornerRadius: 16)
                         .strokeBorder(
                             isDragging ? 
                                 LinearGradient(
-                                    colors: [Color.blue, Color.purple.opacity(0.7)],
+                                    colors: [Color.blue.opacity(0.5), Color.purple.opacity(0.4)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ) :
                                 LinearGradient(
                                     colors: [
-                                        Color.primary.opacity(isHovering ? 0.2 : 0.1),
-                                        Color.primary.opacity(isHovering ? 0.1 : 0.05)
+                                        Color.primary.opacity(isHovering ? 0.1 : 0.07),
+                                        Color.primary.opacity(isHovering ? 0.07 : 0.04)
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 ),
-                            lineWidth: isDragging ? 2 : 1
+                            lineWidth: isDragging ? 1.5 : 1
                         )
                     
-                    // Subtle patterns for visual interest (only in light mode)
+                    // Subtle background elements - more minimal
                     if colorScheme == .light {
                         Circle()
-                            .fill(Color.blue.opacity(0.03))
+                            .fill(Color.blue.opacity(0.02))
                             .frame(width: 200, height: 200)
                             .offset(x: -100, y: -100)
                         
                         Circle()
-                            .fill(Color.purple.opacity(0.03))
+                            .fill(Color.purple.opacity(0.02))
                             .frame(width: 200, height: 200)
                             .offset(x: 100, y: 100)
                     }
                 }
             )
             .overlay(
-                // Add a subtle glow when dragging
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(Color.accentColor.opacity(isDragging ? 0.3 : 0), lineWidth: 3)
+                // Add a subtle glow when dragging - more refined
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.blue.opacity(isDragging ? 0.2 : 0),
+                                Color.purple.opacity(isDragging ? 0.15 : 0)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2
+                    )
                     .blur(radius: 8)
             )
             .contentShape(Rectangle())
@@ -137,30 +164,8 @@ struct DropZoneView: View {
                 isHovering = hovering
             }
         }
-        .scaleEffect(isHovering && !isDragging ? 1.01 : 1.0)
-        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovering)
-    }
-}
-
-// MARK: - Supporting Views
-
-struct KeyboardShortcut: View {
-    let keys: [String]
-    
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(keys, id: \.self) { key in
-                Text(key)
-                    .font(.system(size: 12, weight: .semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.primary.opacity(0.1))
-                    )
-                    .shadow(color: Color.black.opacity(0.05), radius: 1, x: 0, y: 1)
-            }
-        }
+        .scaleEffect(isHovering && !isDragging ? 1.005 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovering)
     }
 }
 

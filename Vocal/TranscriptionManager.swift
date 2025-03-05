@@ -659,7 +659,7 @@ extension CheckedContinuation {
         resume(throwing: error)
     }
     
-    func resumeIfNotResolved<Value>(returning value: Value) where Value == T {
+    func resumeIfNotResolved(returning value: T) {
         guard !resolutionState.isResolved else { return }
         resolutionState.isResolved = true
         resume(returning: value)

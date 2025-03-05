@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var isSearching = false
     @State private var searchText = ""
     @State private var showYouTubeRepairOption = false
+    @State private var isRepairHovered = false
     @FocusState private var isTextFieldFocused: Bool
     
     private let minWindowWidth: CGFloat = 600
@@ -17,8 +18,18 @@ struct ContentView: View {
     
     var body: some View {
         ZStack {
-            // Background blur effect
+            // Background blur effect with subtle gradient overlay
             VisualEffectBlur(material: .headerView, blendingMode: .behindWindow)
+                .overlay(
+                    LinearGradient(
+                        colors: [
+                            Color.blue.opacity(0.02),
+                            Color.purple.opacity(0.02)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .ignoresSafeArea()
             
             VStack(spacing: 20) {
@@ -85,34 +96,59 @@ struct ContentView: View {
     // MARK: - Subviews
     
     private var mainDropZoneView: some View {
-        VStack(spacing: 24) {
+        ZStack(alignment: .bottom) {
+            // Main drop zone
             DropZoneView(
                 isDragging: $isDragging,
                 onTap: handleFileSelection
             )
             
+            // YouTube repair button shown as a subtle pill at the bottom
             if showYouTubeRepairOption {
-                VStack(spacing: 12) {
-                    Text("Having issues with YouTube transcription?")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    Button("Repair YouTube Setup") {
-                        Task {
-                            do {
-                                try await YouTubeManager.repairSetup()
-                                await MainActor.run {
-                                    showYouTubeRepairOption = false
-                                }
-                            } catch {
-                                print("Failed to repair YouTube setup: \(error)")
-                            }
-                        }
+                repairButton
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+    }
+    
+    private var repairButton: some View {
+        Button(action: {
+            Task {
+                do {
+                    try await YouTubeManager.repairSetup()
+                    await MainActor.run {
+                        showYouTubeRepairOption = false
                     }
-                    .buttonStyle(PrimaryButtonStyle())
+                } catch {
+                    print("Failed to repair YouTube setup: \(error)")
                 }
-                .padding(.top, 8)
-                .transition(.opacity)
+            }
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: "wrench.fill")
+                    .font(.system(size: 10))
+                Text("Repair YouTube Setup")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundColor(Color.primary.opacity(0.7))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color.primary.opacity(0.05))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                    )
+            )
+            .scaleEffect(isRepairHovered ? 1.02 : 1.0)
+            .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isRepairHovered = hovering
             }
         }
     }
@@ -176,7 +212,11 @@ struct ContentView: View {
     }
     
     private var searchToggle: some View {
-        Button(action: { isSearching.toggle() }) {
+        Button(action: { 
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isSearching.toggle() 
+            }
+        }) {
             Image(systemName: isSearching ? "xmark.circle.fill" : "magnifyingglass")
                 .foregroundColor(.secondary)
                 .imageScale(.large)
@@ -194,7 +234,11 @@ struct ContentView: View {
                 .focused($isTextFieldFocused)
             
             if !searchText.isEmpty {
-                Button(action: { searchText = "" }) {
+                Button(action: { 
+                    withAnimation(.spring()) {
+                        searchText = "" 
+                    }
+                }) {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.secondary)
                 }
@@ -207,6 +251,7 @@ struct ContentView: View {
                 .fill(Color.primary.opacity(0.05))
         )
         .cornerRadius(8)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
     
     private func loadingView(message: String, progress: Double?, detail: String) -> some View {
@@ -253,9 +298,7 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                 
                 // Detail text with dynamic resizing
-                if detail.isEmpty {
-                    EmptyView()
-                } else {
+                if !detail.isEmpty {
                     Text(detail)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -285,6 +328,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(GlassButtonStyle())
                 .padding(.top, 16)
+                .transition(.opacity)
             }
             
             Spacer()
@@ -293,7 +337,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color.primary.opacity(0.03))
+                .fill(Color.primary.opacity(0.02))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
                         .strokeBorder(Color.primary.opacity(0.05), lineWidth: 1)
@@ -309,12 +353,12 @@ struct ContentView: View {
             // Error icon with animation
             ZStack {
                 Circle()
-                    .fill(Color.red.opacity(0.1))
+                    .fill(Color.red.opacity(0.08))
                     .frame(width: 80, height: 80)
                 
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 32))
-                    .foregroundColor(.red)
+                    .font(.system(size: 30))
+                    .foregroundColor(.red.opacity(0.8))
             }
             
             VStack(spacing: 16) {
@@ -345,7 +389,7 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(SecondaryButtonStyle())
                     
                     // Add a help text for context
                     Text("This will reinstall the necessary components for YouTube transcription")
@@ -360,7 +404,7 @@ struct ContentView: View {
                     Button("Open Privacy Settings") {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")!)
                     }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(SecondaryButtonStyle())
                 }
                 
                 // Always provide a dismiss button
@@ -378,10 +422,10 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(Color.primary.opacity(0.03))
+                .fill(Color.primary.opacity(0.02))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(Color.red.opacity(0.1), lineWidth: 1)
+                        .strokeBorder(Color.red.opacity(0.08), lineWidth: 1)
                 )
         )
         .transition(.opacity.combined(with: .scale(scale: 0.98)))
@@ -397,6 +441,7 @@ struct ContentView: View {
         var body: some View {
             HStack(spacing: 4) {
                 Image(systemName: icon)
+                    .font(.caption2)
                 Text(value)
                     .fontWeight(.medium)
                 Text(label)
@@ -424,18 +469,16 @@ struct ContentView: View {
     
     private func checkYouTubeSetup() {
         Task {
-            do {
-                let dependencies = await SystemDependencyChecker.checkDependencies()
-                let hasYouTubeDependencyIssues = dependencies.contains(where: { dependency in
-                    dependency.dependency.rawValue.contains("yt-dlp") || 
-                    dependency.dependency.rawValue.contains("ffmpeg")
-                })
-                
-                await MainActor.run {
+            let dependencies = await SystemDependencyChecker.checkDependencies()
+            let hasYouTubeDependencyIssues = dependencies.contains(where: { dependency in
+                dependency.dependency.rawValue.contains("yt-dlp") || 
+                dependency.dependency.rawValue.contains("ffmpeg")
+            })
+            
+            await MainActor.run {
+                withAnimation(.spring()) {
                     showYouTubeRepairOption = hasYouTubeDependencyIssues
                 }
-            } catch {
-                print("Failed to check YouTube setup: \(error)")
             }
         }
     }
@@ -510,6 +553,10 @@ struct ContentView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(manager.transcription, forType: .string)
+        
+        // Add a subtle feedback animation here
+        let generator = NSHapticFeedbackManager.defaultPerformer
+        generator.perform(.generic, performanceTime: .default)
     }
     
     private func saveTranscription() {
@@ -537,7 +584,9 @@ struct ContentView: View {
     
     private func cancelOperation() {
         Task { @MainActor in
-            manager.clearContent()
+            withAnimation(.spring()) {
+                manager.clearContent()
+            }
         }
     }
 }
