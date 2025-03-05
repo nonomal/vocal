@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSAppTransportSecurity</key>
@@ -29,9 +29,15 @@
 	<string>We need access to download YouTube videos for transcription.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>We need to run helper scripts for YouTube video processing.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>We need speech recognition to transcribe audio from your videos.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need microphone access for speech recognition capabilities.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Vocal uses speech recognition to transcribe audio from your videos into text.</string>
+	<key>NSFileProviderDomainUsageDescription</key>
+	<string>We need access to files for transcription.</string>
+	<key>NSFileProviderPresenceUsageDescription</key>
+	<string>We need to access files for transcription.</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 </dict>
 </plist>

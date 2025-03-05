@@ -9,57 +9,40 @@ A minimal, native macOS app that transcribes YouTube videos and local video file
 - **Local Video Support**: Drag & drop or click to upload local video files
 - **Smart Formatting**: Automatically formats transcriptions into readable paragraphs
 - **Multiple Export Options**: Copy or save transcriptions with a single click
-- **Progress Tracking**: Real-time progress bars for both download and transcription
+- **Progress Tracking**: Real-time progress bars and visual feedback for downloads and transcription
+- **Robust Error Handling**: Smart recovery options for common issues
+- **Modern UI**: Beautiful, minimal interface with fluid animations and responsive design
 - **Native Performance**: Built with SwiftUI for optimal macOS integration
 - **Dark and Light Modes**: Seamless integration with your system preferences
+- **Zero Setup**: All dependencies are now embedded and automatically configured
 
 ## 💻 Get Started
 
-### To use Vocal, you can follow these quick steps to set up the app on your macOS system.
+### To use Vocal, simply download and run the app:
 
-	1.	Download the App: Get the latest version from the releases page.
-	2.	Install Prerequisites: Vocal requires Python, Homebrew, and yt-dlp for downloading and processing YouTube videos.
+1. **Download the App**: Get the latest version from the releases page.
+2. **Launch Vocal**: Open the app and start transcribing your videos!
 
-### Setting Up Prerequisites for YouTube Videos (Local videos have no requirements)
+### That's it! No additional setup required.
 
-### Install Python
-
-To install Python on macOS, open your Terminal and use the following command:
-
-```bash
-brew install python
-```
-
-### Install Homebrew
-
-If you don’t have Homebrew, you can install it by running:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-### Install yt-dlp
-
-Finally, install yt-dlp using Homebrew:
-
-```bash
-brew install yt-dlp
-```
-
-	3.	Launch Vocal: Once prerequisites are installed, open Vocal and transcribe your videos!
-
+Vocal now includes all necessary components for YouTube video transcription. The app will automatically set up everything it needs the first time you use it, with improved reliability and error recovery.
 
 ## 🛠️ Technical Details
 - Built with SwiftUI and AVFoundation
 - Uses Apple's Speech Recognition framework for high-quality transcription
 - Integrated with yt-dlp for reliable YouTube video downloading
+- Robust dependency management with automatic repair capabilities
+- Enhanced error handling with contextual recovery options
+- Modern UI with fluid animations and responsive design
 - Native macOS window management and system integration
+- Embedded dependencies for zero-configuration setup
 
 ## 🎯 Use Cases
 - **Content Creation**: Quickly transcribe video content for blogs or articles
 - **Research**: Convert video interviews or lectures into searchable text
 - **Accessibility**: Make video content accessible through text
 - **Note Taking**: Transform video lessons into written notes
+- **Video Editing**: Generate scripts or captions from existing videos
 
 ## 🤝 Contributing
 We welcome contributions! Here's how you can help:
@@ -82,6 +65,8 @@ Please ensure your PR:
 - Advanced export formats (PDF, SRT, VTT)
 - Video mini-player while transcribing
 - Quick edit mode for transcriptions
+- Speaker detection in transcriptions
+- AI-powered summarization and key point extraction
 
 ## 📝 License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

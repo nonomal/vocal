@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var isDragging = false
     @State private var isSearching = false
     @State private var searchText = ""
+    @State private var showYouTubeRepairOption = false
     @FocusState private var isTextFieldFocused: Bool
     
     private let minWindowWidth: CGFloat = 600
@@ -33,11 +34,11 @@ struct ContentView: View {
                     transcriptionView
                 } else if case .completed = manager.state {
                     transcriptionView
-                } else if case .downloading = manager.downloadState {
+                } else if case .downloading(let progress, let speed, let eta, _) = manager.downloadState {
                     loadingView(
-                        message: "Downloading video...",
-                        progress: manager.downloadProgress,
-                        detail: manager.downloadState.progressText
+                        message: "Downloading YouTube video...",
+                        progress: progress,
+                        detail: "\(speed ?? "") \(eta ?? "")"
                     )
                 } else if case .preparingAudio = manager.state {
                     loadingView(
@@ -45,19 +46,16 @@ struct ContentView: View {
                         progress: nil,
                         detail: "Extracting audio from video"
                     )
-                } else if case .transcribing(let progress, let currentText) = manager.state {
+                } else if case .transcribing(let progress, _) = manager.state {
                     loadingView(
                         message: "Transcribing...",
                         progress: progress,
-                        detail: "\(Int(progress * 100))% - Currently processing: \(currentText.suffix(50))..."
+                        detail: "\(Int(progress * 100))% complete"
                     )
                 } else if case .error(let message) = manager.state {
                     errorView(message: message)
                 } else {
-                    DropZoneView(
-                        isDragging: $isDragging,
-                        onTap: handleFileSelection
-                    )
+                    mainDropZoneView
                 }
             }
             .padding(30)
@@ -65,6 +63,7 @@ struct ContentView: View {
         .frame(minWidth: minWindowWidth, minHeight: minWindowHeight)
         .onAppear {
             setupPasteboardMonitoring()
+            checkYouTubeSetup()
         }
         .onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
             loadFirstProvider(from: providers)
@@ -73,12 +72,50 @@ struct ContentView: View {
         .sheet(isPresented: $manager.showDependencyAlert) {
             DependencyAlertView(
                 missingDependencies: manager.missingDependencies,
-                onDismiss: { manager.showDependencyAlert = false }
+                onDismiss: { manager.showDependencyAlert = false },
+                onSetupAutomatically: {
+                    Task {
+                        _ = await SystemDependencyChecker.setupMissingDependencies()
+                    }
+                }
             )
         }
     }
     
     // MARK: - Subviews
+    
+    private var mainDropZoneView: some View {
+        VStack(spacing: 24) {
+            DropZoneView(
+                isDragging: $isDragging,
+                onTap: handleFileSelection
+            )
+            
+            if showYouTubeRepairOption {
+                VStack(spacing: 12) {
+                    Text("Having issues with YouTube transcription?")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Button("Repair YouTube Setup") {
+                        Task {
+                            do {
+                                try await YouTubeManager.repairSetup()
+                                await MainActor.run {
+                                    showYouTubeRepairOption = false
+                                }
+                            } catch {
+                                print("Failed to repair YouTube setup: \(error)")
+                            }
+                        }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
+                .padding(.top, 8)
+                .transition(.opacity)
+            }
+        }
+    }
     
     private var transcriptionView: some View {
         VStack(spacing: 16) {
@@ -97,23 +134,8 @@ struct ContentView: View {
             }
             
             // Main transcription area with adaptive text
-            ScrollView {
-                if manager.transcription.count < 500 {
-                    AdaptiveTextView(text: manager.transcription)
-                        .padding()
-                        .textSelection(.enabled)
-                } else {
-                    Text(manager.transcription)
-                        .padding()
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .lineSpacing(4)
-                        .font(.body)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.primary.opacity(0.05))
-            .cornerRadius(12)
+            AdaptiveTextView(text: manager.transcription)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             
             // Action buttons
             ButtonGroup(buttons: [
@@ -180,133 +202,189 @@ struct ContentView: View {
             }
         }
         .padding(8)
-        .background(Color.primary.opacity(0.05))
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(0.05))
+        )
         .cornerRadius(8)
     }
     
     private func loadingView(message: String, progress: Double?, detail: String) -> some View {
-        VStack(spacing: 24) {
-            // Main progress container
-            VStack(spacing: 16) {
-                // Title and progress percentage
-                HStack {
-                    Text(message)
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    Spacer()
-                    
-                    if let progress = progress {
-                        Text("\(Int(progress * 100))%")
-                            .font(.system(.subheadline, design: .rounded))
-                            .foregroundColor(.secondary)
-                    }
-                }
+        VStack(spacing: 30) {
+            Spacer()
+            
+            // Loading icon
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.1))
+                    .frame(width: 80, height: 80)
                 
                 if let progress = progress {
-                    // Modern progress bar
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            // Background track
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.secondary.opacity(0.1))
-                                .frame(height: 4)
-                            
-                            // Progress fill with gradient
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [
-                                            Color.accentColor,
-                                            Color.accentColor.opacity(0.8)
-                                        ]),
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: geometry.size.width * progress, height: 4)
-                                .animation(.linear(duration: 0.3), value: progress)
-                        }
-                    }
-                    .frame(height: 4)
+                    // Circular progress indicator
+                    Circle()
+                        .trim(from: 0, to: CGFloat(progress))
+                        .stroke(
+                            LinearGradient(
+                                colors: [.blue, .purple],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 80, height: 80)
+                        .animation(.easeInOut, value: progress)
                     
-                    // Download stats container
-                    if case .downloading(_, let speed, let eta, let size) = manager.downloadState {
-                        HStack(spacing: 16) {
-                            // Speed indicator
-                            if let speed = speed {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.down.circle.fill")
-                                        .foregroundColor(.accentColor)
-                                    Text(speed)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            // Divider
-                            if speed != nil && (eta != nil || size != nil) {
-                                Text("·")
-                                    .foregroundColor(.secondary.opacity(0.5))
-                            }
-                            
-                            // ETA
-                            if let eta = eta {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "clock.fill")
-                                        .foregroundColor(.accentColor.opacity(0.8))
-                                    Text(eta.replacingOccurrences(of: "ETA: ", with: ""))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            // Divider
-                            if eta != nil && size != nil {
-                                Text("·")
-                                    .foregroundColor(.secondary.opacity(0.5))
-                            }
-                            
-                            // File size
-                            if let size = size {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "folder.fill")
-                                        .foregroundColor(.accentColor.opacity(0.6))
-                                    Text(size)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        .font(.system(.caption, design: .rounded))
-                        .padding(.top, 8)
-                    }
+                    // Percentage in center
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.accentColor)
                 } else {
+                    // Indeterminate spinner
                     ProgressView()
-                        .scaleEffect(0.8)
+                        .scaleEffect(1.5)
                 }
             }
-            .padding(24)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(NSColor.windowBackgroundColor))
-                    .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
-            )
-            .frame(maxWidth: 400)
+            
+            VStack(spacing: 16) {
+                // Main message
+                Text(message)
+                    .font(.title2.bold())
+                    .multilineTextAlignment(.center)
+                
+                // Detail text with dynamic resizing
+                if detail.isEmpty {
+                    EmptyView()
+                } else {
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 300)
+                        .animation(.easeInOut, value: detail)
+                }
+                
+                // Only show progress bar for certain states
+                if let progress = progress, message.contains("Downloading") || message.contains("Transcribing") {
+                    VStack(spacing: 4) {
+                        // Progress bar
+                        ProgressView(value: progress)
+                            .progressViewStyle(LinearProgressViewStyle())
+                            .frame(maxWidth: 300)
+                            .animation(.easeInOut, value: progress)
+                    }
+                    .padding(.top, 8)
+                }
+            }
+            
+            // Add a cancel button for long-running operations
+            if message.contains("Downloading") || message.contains("Transcribing") {
+                Button("Cancel") {
+                    cancelOperation()
+                }
+                .buttonStyle(GlassButtonStyle())
+                .padding(.top, 16)
+            }
+            
+            Spacer()
         }
+        .padding(30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.primary.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .strokeBorder(Color.primary.opacity(0.05), lineWidth: 1)
+                )
+        )
+        .transition(.opacity.combined(with: .scale(scale: 0.98)))
     }
     
     private func errorView(message: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40))
-                .foregroundColor(.red)
+        VStack(spacing: 30) {
+            Spacer()
             
-            Text(message)
-                .foregroundColor(.red)
-                .multilineTextAlignment(.center)
-            
-            Button("Try Again") {
-                manager.clearContent()
+            // Error icon with animation
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.1))
+                    .frame(width: 80, height: 80)
+                
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(.red)
             }
+            
+            VStack(spacing: 16) {
+                Text("Error")
+                    .font(.title2.bold())
+                
+                Text(message)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 400)
+            }
+            
+            VStack(spacing: 12) {
+                // Show appropriate action buttons based on error type
+                if message.contains("YouTube") || message.contains("yt-dlp") || message.contains("download") {
+                    Button("Repair YouTube Setup") {
+                        Task {
+                            do {
+                                try await YouTubeManager.repairSetup()
+                                await MainActor.run {
+                                    manager.clearContent()
+                                }
+                            } catch {
+                                print("Failed to repair YouTube setup: \(error)")
+                            }
+                        }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    
+                    // Add a help text for context
+                    Text("This will reinstall the necessary components for YouTube transcription")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+                
+                // If authorization related, show open settings button
+                if message.contains("authorization") || message.contains("denied") || message.contains("Privacy") {
+                    Button("Open Privacy Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")!)
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
+                
+                // Always provide a dismiss button
+                Button("Dismiss") {
+                    manager.clearContent()
+                }
+                .buttonStyle(GlassButtonStyle())
+                .padding(.top, 8)
+            }
+            .padding(.top, 8)
+            
+            Spacer()
         }
+        .padding(30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.primary.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .strokeBorder(Color.red.opacity(0.1), lineWidth: 1)
+                )
+        )
+        .transition(.opacity.combined(with: .scale(scale: 0.98)))
     }
     
     // MARK: - Helper Views
@@ -343,6 +421,24 @@ struct ContentView: View {
     }
     
     // MARK: - Functions
+    
+    private func checkYouTubeSetup() {
+        Task {
+            do {
+                let dependencies = await SystemDependencyChecker.checkDependencies()
+                let hasYouTubeDependencyIssues = dependencies.contains(where: { dependency in
+                    dependency.dependency.rawValue.contains("yt-dlp") || 
+                    dependency.dependency.rawValue.contains("ffmpeg")
+                })
+                
+                await MainActor.run {
+                    showYouTubeRepairOption = hasYouTubeDependencyIssues
+                }
+            } catch {
+                print("Failed to check YouTube setup: \(error)")
+            }
+        }
+    }
     
     private func setupPasteboardMonitoring() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -436,6 +532,12 @@ struct ContentView: View {
                     manager.handleError("Failed to save transcription: \(error.localizedDescription)")
                 }
             }
+        }
+    }
+    
+    private func cancelOperation() {
+        Task { @MainActor in
+            manager.clearContent()
         }
     }
 }

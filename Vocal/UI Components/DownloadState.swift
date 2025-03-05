@@ -4,6 +4,8 @@ enum DownloadState {
     case preparing
     case downloading(progress: Double, speed: String?, eta: String?, size: String?)
     case processing
+    case completed
+    case error(String)
     
     var progressText: String {
         switch self {
@@ -16,6 +18,10 @@ enum DownloadState {
             return parts.joined(separator: " · ")
         case .processing:
             return "Processing..."
+        case .completed:
+            return "Download completed"
+        case .error(let message):
+            return "Error: \(message)"
         }
     }
 }
